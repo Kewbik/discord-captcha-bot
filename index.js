@@ -1,12 +1,11 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, AttachmentBuilder } = require('discord.js');
-const Canvas = require('canvas');
+
+const { Client, GatewayIntentBits } = require('discord.js');
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildVoiceStates,
-    GatewayIntentBits.GuildMessages,
     GatewayIntentBits.DirectMessages,
     GatewayIntentBits.MessageContent
   ]
@@ -19,67 +18,30 @@ client.on('ready', () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 });
 
-// Generate captcha image
+// Generate captcha (image URL instead of canvas)
 function generateCaptcha() {
-  const canvas = Canvas.createCanvas(200, 80);
-  const ctx = canvas.getContext('2d');
-
-  // Background
-  ctx.fillStyle = '#f2f2f2';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  // Random text
   const text = Math.random().toString(36).substring(2, 7);
-
-  // Distorted text
-  ctx.font = '30px Arial';
-  ctx.fillStyle = '#000';
-
-  for (let i = 0; i < text.length; i++) {
-    const x = 30 + i * 30;
-    const y = 40 + Math.random() * 20;
-
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.rotate((Math.random() - 0.5) * 0.5);
-    ctx.fillText(text[i], 0, 0);
-    ctx.restore();
-  }
-
-  // Noise lines
-  for (let i = 0; i < 5; i++) {
-    ctx.strokeStyle = '#888';
-    ctx.beginPath();
-    ctx.moveTo(Math.random() * 200, Math.random() * 80);
-    ctx.lineTo(Math.random() * 200, Math.random() * 80);
-    ctx.stroke();
-  }
-
-  return {
-    text,
-    buffer: canvas.toBuffer()
-  };
+  const url = `https://dummyimage.com/200x80/000/fff&text=${text}`;
+  return { text, url };
 }
 
 client.on('voiceStateUpdate', async (oldState, newState) => {
   const member = newState.member;
 
-  // User joined voice channel
+  // User joined VC
   if (!oldState.channel && newState.channel) {
 
-    // Skip already verified users
+    // Skip verified users
     if (verifiedUsers.has(member.id)) return;
 
     try {
-      // Kick user from VC
+      // Kick from VC
       await member.voice.disconnect();
 
       const captcha = generateCaptcha();
-      const attachment = new AttachmentBuilder(captcha.buffer, { name: 'captcha.png' });
 
       const dm = await member.send({
-        content: "🧩 Solve this captcha:",
-        files: [attachment]
+        content: `🧩 Solve this captcha:\n${captcha.url}`
       });
 
       const filter = m => m.author.id === member.id;
@@ -91,12 +53,12 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
       });
 
       if (!collected.size) {
-        return member.send("⏰ Time expired.");
+        return member.send("⏰ Time expired. Try again.");
       }
 
       const answer = collected.first().content;
 
-      if (answer === captcha.text) {
+      if (answer.toLowerCase() === captcha.text.toLowerCase()) {
         verifiedUsers.add(member.id);
         await member.send("✅ Verified! You can now join the voice channel.");
       } else {
@@ -108,7 +70,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     }
   }
 
-  // User left voice channel → reset verification
+  // Reset verification when user leaves VC
   if (oldState.channel && !newState.channel) {
     verifiedUsers.delete(member.id);
   }
