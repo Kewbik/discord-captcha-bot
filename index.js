@@ -1,5 +1,4 @@
 require('dotenv').config();
-
 const { Client, GatewayIntentBits } = require('discord.js');
 
 const client = new Client({
@@ -12,15 +11,23 @@ const client = new Client({
 });
 
 const verifiedUsers = new Set();
+const cooldown = new Set();
+
 const CAPTCHA_TIMEOUT = 30000;
+const COOLDOWN_TIME = 30000;
 
 client.on('ready', () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 });
 
-// Generate captcha (image URL instead of canvas)
+// Better captcha generator
 function generateCaptcha() {
-  const text = Math.random().toString(36).substring(2, 7);
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
+  let text = "";
+  for (let i = 0; i < 5; i++) {
+    text += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+
   const url = `https://dummyimage.com/200x80/000/fff&text=${text}`;
   return { text, url };
 }
@@ -31,17 +38,30 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
   // User joined VC
   if (!oldState.channel && newState.channel) {
 
-    // Skip verified users
     if (verifiedUsers.has(member.id)) return;
+    if (cooldown.has(member.id)) return;
+
+    cooldown.add(member.id);
+    setTimeout(() => cooldown.delete(member.id), COOLDOWN_TIME);
 
     try {
-      // Kick from VC
+      // Disconnect from VC
       await member.voice.disconnect();
 
       const captcha = generateCaptcha();
 
+      // Send captcha embed
       const dm = await member.send({
-        content: `🧩 Solve this captcha:\n${captcha.url}`
+        embeds: [
+          {
+            title: "Verification Required",
+            description: "Please type the text shown in the captcha image.",
+            color: 0x2b2d31,
+            image: {
+              url: captcha.url
+            }
+          }
+        ]
       });
 
       const filter = m => m.author.id === member.id;
@@ -53,7 +73,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
       });
 
       if (!collected.size) {
-        return member.send("⏰ Time expired. Try again.");
+        return member.send("⏰ Time expired. Try joining the voice channel again.");
       }
 
       const answer = collected.first().content;
@@ -70,7 +90,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     }
   }
 
-  // Reset verification when user leaves VC
+  // Reset verification when leaving VC
   if (oldState.channel && !newState.channel) {
     verifiedUsers.delete(member.id);
   }
