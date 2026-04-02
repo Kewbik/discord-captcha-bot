@@ -16,14 +16,20 @@ const cooldown = new Set();
 const CAPTCHA_TIMEOUT = 30000;
 const COOLDOWN_TIME = 30000;
 
+// BYPASS ROLE IDs (dej sem ID rolí)
+const bypassRoleIDs = [
+  "1489344221952348200"
+];
+
 client.on('ready', () => {
-  console.log(`✅ Logged in as ${client.user.tag}`);
+  console.log(`Logged in as ${client.user.tag}`);
 });
 
-// Better captcha generator
+// Captcha generator
 function generateCaptcha() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
   let text = "";
+
   for (let i = 0; i < 5; i++) {
     text += chars.charAt(Math.floor(Math.random() * chars.length));
   }
@@ -35,6 +41,14 @@ function generateCaptcha() {
 client.on('voiceStateUpdate', async (oldState, newState) => {
   const member = newState.member;
 
+  // Ignore bots
+  if (member.user.bot) return;
+
+  // Bypass roles
+  if (member.roles.cache.some(role => bypassRoleIDs.includes(role.id))) {
+    return;
+  }
+
   // User joined VC
   if (!oldState.channel && newState.channel) {
 
@@ -45,12 +59,15 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     setTimeout(() => cooldown.delete(member.id), COOLDOWN_TIME);
 
     try {
-      // Disconnect from VC
       await member.voice.disconnect();
+    } catch (err) {
+      console.log("Cannot disconnect user:", err);
+      return;
+    }
 
-      const captcha = generateCaptcha();
+    const captcha = generateCaptcha();
 
-      // Send captcha embed
+    try {
       const dm = await member.send({
         embeds: [
           {
@@ -73,20 +90,20 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
       });
 
       if (!collected.size) {
-        return member.send("⏰ Time expired. Try joining the voice channel again.");
+        return member.send("Time expired. Try joining the voice channel again.");
       }
 
       const answer = collected.first().content;
 
       if (answer.toLowerCase() === captcha.text.toLowerCase()) {
         verifiedUsers.add(member.id);
-        await member.send("✅ Verified! You can now join the voice channel.");
+        await member.send("Verified! You can now join the voice channel.");
       } else {
-        await member.send("❌ Wrong captcha. Try joining again.");
+        await member.send("Wrong captcha. Try again.");
       }
 
     } catch (err) {
-      console.log("⚠️ DM failed or error occurred.", err);
+      console.log("DM failed:", err);
     }
   }
 
