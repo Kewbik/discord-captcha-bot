@@ -5,6 +5,7 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.DirectMessages,
     GatewayIntentBits.MessageContent
   ]
@@ -46,40 +47,37 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
   const member = newState.member;
   if (!member || member.user.bot) return;
 
+  const status = userStatus.get(member.id);
+
   // bypass role
   if (member.roles.cache.some(role => bypassRoleIDs.includes(role.id))) {
     return;
   }
 
-  // USER JOINED VC
-  if (!oldState.channel && newState.channel) {
+  // USER JE V NĚJAKÉM VC (join nebo switch)
+  if (newState.channel) {
 
-    const status = userStatus.get(member.id);
-
-    // verified → allow
-    if (status === "verified") {
-      return;
+    // 👉 pokud není verified → drž ho ve waiting room
+    if (status !== "verified" && newState.channel.id !== WAITING_ROOM_ID) {
+      try {
+        await member.voice.setChannel(WAITING_ROOM_ID);
+      } catch (err) {
+        console.log("Force move failed:", err);
+      }
     }
 
-    // 👉 uložíme původní channel
-    const originalChannel = newState.channel;
+    // 👉 pokud už řeší captcha → nic nedělej
+    if (status === "verifying") return;
 
-    // 👉 místo kicku → move do waiting room
-    try {
-      await member.voice.setChannel(WAITING_ROOM_ID);
-    } catch (err) {
-      console.log("Move failed:", err);
-    }
+    // 👉 pokud už je verified → nech ho být
+    if (status === "verified") return;
 
-    // anti spam
+    // 👉 anti spam
     if (joinCooldown.has(member.id)) return;
     joinCooldown.add(member.id);
     setTimeout(() => joinCooldown.delete(member.id), COOLDOWN_TIME);
 
-    // pokud už řeší captcha → neposílej znovu
-    if (status === "verifying") return;
-
-    // nastav verifying
+    // 👉 začni verification
     userStatus.set(member.id, "verifying");
 
     const captcha = generateCaptcha();
@@ -111,16 +109,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
 
       if (answer.toLowerCase() === captcha.text.toLowerCase()) {
         userStatus.set(member.id, "verified");
-        await member.send("Verified! Moving you back...");
-
-        // 👉 vrátíme zpět do původního channelu
-        try {
-          if (originalChannel) {
-            await member.voice.setChannel(originalChannel);
-          }
-        } catch (err) {
-          console.log("Return move failed:", err);
-        }
+        await member.send("Verified! You can now join any voice channel.");
 
         // expire verification
         setTimeout(() => {
