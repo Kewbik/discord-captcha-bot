@@ -10,11 +10,11 @@ const client = new Client({
   ]
 });
 
-// místo Set → stavový systém
 const userStatus = new Map(); // verifying / verified
 const joinCooldown = new Set();
 
 const CAPTCHA_TIMEOUT = 30000;
+const VERIFY_EXPIRE = 60000;
 const COOLDOWN_TIME = 3000;
 
 // BYPASS ROLE IDs
@@ -41,59 +41,50 @@ function generateCaptcha() {
 
 client.on('voiceStateUpdate', async (oldState, newState) => {
   const member = newState.member;
-
-  if (member.user.bot) return;
+  if (!member || member.user.bot) return;
 
   // bypass role
   if (member.roles.cache.some(role => bypassRoleIDs.includes(role.id))) {
     return;
   }
 
-  // anti spam
-  if (joinCooldown.has(member.id)) return;
-  joinCooldown.add(member.id);
-  setTimeout(() => joinCooldown.delete(member.id), COOLDOWN_TIME);
-
-  // user joined VC
+  // USER JOINED VC
   if (!oldState.channel && newState.channel) {
 
     const status = userStatus.get(member.id);
 
-    // už verified → pust ho
-    if (status === "verified") return;
+    // 🔥 HARD BLOCK — nikdy nepustí bez verified
+    if (status !== "verified") {
+      try { await member.voice.disconnect(); } catch {}
+    }
 
-    // pokud už řeší captcha → kickni znovu
-    if (status === "verifying") {
-      try {
-        await member.voice.disconnect();
-      } catch {}
+    // Anti spam (ale vždy kickne)
+    if (joinCooldown.has(member.id)) {
       return;
     }
+
+    joinCooldown.add(member.id);
+    setTimeout(() => joinCooldown.delete(member.id), COOLDOWN_TIME);
+
+    // pokud je verified → pust ho
+    if (status === "verified") return;
+
+    // pokud už řeší captcha → nic nedělej (už dostal DM)
+    if (status === "verifying") return;
 
     // nastav verifying
     userStatus.set(member.id, "verifying");
-
-    try {
-      await member.voice.disconnect();
-    } catch (err) {
-      console.log("Cannot disconnect user:", err);
-      return;
-    }
 
     const captcha = generateCaptcha();
 
     try {
       const dm = await member.send({
-        embeds: [
-          {
-            title: "Verification Required",
-            description: "Please type the text shown in the captcha image.",
-            color: 0x2b2d31,
-            image: {
-              url: captcha.url
-            }
-          }
-        ]
+        embeds: [{
+          title: "Verification Required",
+          description: "Please type the text shown in the captcha image.",
+          color: 0x2b2d31,
+          image: { url: captcha.url }
+        }]
       });
 
       const filter = m => m.author.id === member.id;
@@ -106,7 +97,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
 
       if (!collected.size) {
         userStatus.delete(member.id);
-        return member.send("Time expired. Try joining again.");
+        return member.send("Time expired. Try again.");
       }
 
       const answer = collected.first().content;
@@ -115,10 +106,10 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
         userStatus.set(member.id, "verified");
         await member.send("Verified! You can now join the voice channel.");
 
-        // expire po 10 minutách
+        // ⏱ expire after 60s
         setTimeout(() => {
           userStatus.delete(member.id);
-        }, 600000);
+        }, VERIFY_EXPIRE);
 
       } else {
         userStatus.delete(member.id);
