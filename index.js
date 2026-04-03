@@ -53,23 +53,22 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
 
     const status = userStatus.get(member.id);
 
-    // 🔥 HARD BLOCK — nikdy nepustí bez verified
-    if (status !== "verified") {
-      try { await member.voice.disconnect(); } catch {}
-    }
-
-    // Anti spam (ale vždy kickne)
-    if (joinCooldown.has(member.id)) {
+    // verified → allow
+    if (status === "verified") {
       return;
     }
 
+    // kick pokud není verified
+    try {
+      await member.voice.disconnect();
+    } catch {}
+
+    // anti spam
+    if (joinCooldown.has(member.id)) return;
     joinCooldown.add(member.id);
     setTimeout(() => joinCooldown.delete(member.id), COOLDOWN_TIME);
 
-    // pokud je verified → pust ho
-    if (status === "verified") return;
-
-    // pokud už řeší captcha → nic nedělej (už dostal DM)
+    // pokud už řeší captcha → neposílej znovu
     if (status === "verifying") return;
 
     // nastav verifying
@@ -106,7 +105,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
         userStatus.set(member.id, "verified");
         await member.send("Verified! You can now join the voice channel.");
 
-        // ⏱ expire after 60s
+        // expire verification
         setTimeout(() => {
           userStatus.delete(member.id);
         }, VERIFY_EXPIRE);
