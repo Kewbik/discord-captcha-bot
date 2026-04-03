@@ -18,7 +18,7 @@ const VERIFY_EXPIRE = 60000;
 const COOLDOWN_TIME = 3000;
 
 // 👉 ID WAITING ROOMKY
-const WAITING_ROOM_ID = "TVUJ_CHANNEL_ID";
+const WAITING_ROOM_ID = "1489718904409292930";
 
 // BYPASS ROLE IDs
 const bypassRoleIDs = [
@@ -66,7 +66,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
 
     // 👉 místo kicku → move do waiting room
     try {
-      await member.voice.setChannel(1489718904409292930);
+      await member.voice.setChannel(WAITING_ROOM_ID);
     } catch (err) {
       console.log("Move failed:", err);
     }
