@@ -17,6 +17,9 @@ const CAPTCHA_TIMEOUT = 30000;
 const VERIFY_EXPIRE = 60000;
 const COOLDOWN_TIME = 3000;
 
+// 👉 ID WAITING ROOMKY
+const WAITING_ROOM_ID = "TVUJ_CHANNEL_ID";
+
 // BYPASS ROLE IDs
 const bypassRoleIDs = [
   "1489344221952348200"
@@ -58,10 +61,15 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
       return;
     }
 
-    // kick pokud není verified
+    // 👉 uložíme původní channel
+    const originalChannel = newState.channel;
+
+    // 👉 místo kicku → move do waiting room
     try {
-      await member.voice.disconnect();
-    } catch {}
+      await member.voice.setChannel(1489718904409292930);
+    } catch (err) {
+      console.log("Move failed:", err);
+    }
 
     // anti spam
     if (joinCooldown.has(member.id)) return;
@@ -103,7 +111,16 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
 
       if (answer.toLowerCase() === captcha.text.toLowerCase()) {
         userStatus.set(member.id, "verified");
-        await member.send("Verified! You can now join the voice channel.");
+        await member.send("Verified! Moving you back...");
+
+        // 👉 vrátíme zpět do původního channelu
+        try {
+          if (originalChannel) {
+            await member.voice.setChannel(originalChannel);
+          }
+        } catch (err) {
+          console.log("Return move failed:", err);
+        }
 
         // expire verification
         setTimeout(() => {
