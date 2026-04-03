@@ -13,6 +13,7 @@ const client = new Client({
 
 const userStatus = new Map(); // verifying / verified
 const joinCooldown = new Set();
+const originalChannels = new Map(); // 👉 uloží původní channel
 
 const CAPTCHA_TIMEOUT = 30000;
 const VERIFY_EXPIRE = 60000;
@@ -47,18 +48,29 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
   const member = newState.member;
   if (!member || member.user.bot) return;
 
-  const status = userStatus.get(member.id);
-
   // bypass role
   if (member.roles.cache.some(role => bypassRoleIDs.includes(role.id))) {
     return;
   }
 
-  // USER JE V NĚJAKÉM VC (join nebo switch)
+  const status = userStatus.get(member.id);
+
+  // USER JE VE VOICE
   if (newState.channel) {
+
+    // 👉 pokud už je ve waiting room a řeší captcha → NIC NEDĚLEJ
+    if (newState.channel.id === WAITING_ROOM_ID && status === "verifying") {
+      return;
+    }
 
     // 👉 pokud není verified → drž ho ve waiting room
     if (status !== "verified" && newState.channel.id !== WAITING_ROOM_ID) {
+
+      // uložíme původní channel (jen poprvé)
+      if (!originalChannels.has(member.id)) {
+        originalChannels.set(member.id, newState.channel.id);
+      }
+
       try {
         await member.voice.setChannel(WAITING_ROOM_ID);
       } catch (err) {
@@ -66,10 +78,10 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
       }
     }
 
-    // 👉 pokud už řeší captcha → nic nedělej
+    // 👉 už řeší captcha → nespouštěj znovu
     if (status === "verifying") return;
 
-    // 👉 pokud už je verified → nech ho být
+    // 👉 už je verified → nech ho být
     if (status === "verified") return;
 
     // 👉 anti spam
@@ -102,6 +114,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
 
       if (!collected.size) {
         userStatus.delete(member.id);
+        originalChannels.delete(member.id);
         return member.send("Time expired. Try again.");
       }
 
@@ -109,7 +122,20 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
 
       if (answer.toLowerCase() === captcha.text.toLowerCase()) {
         userStatus.set(member.id, "verified");
-        await member.send("Verified! You can now join any voice channel.");
+        await member.send("Verified! Moving you back...");
+
+        // 👉 vrátíme zpět do původního channelu
+        const originalChannelId = originalChannels.get(member.id);
+
+        try {
+          if (originalChannelId) {
+            await member.voice.setChannel(originalChannelId);
+          }
+        } catch (err) {
+          console.log("Return move failed:", err);
+        }
+
+        originalChannels.delete(member.id);
 
         // expire verification
         setTimeout(() => {
@@ -118,18 +144,21 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
 
       } else {
         userStatus.delete(member.id);
+        originalChannels.delete(member.id);
         await member.send("Wrong captcha. Try again.");
       }
 
     } catch (err) {
       console.log("DM failed:", err);
       userStatus.delete(member.id);
+      originalChannels.delete(member.id);
     }
   }
 
   // reset když odejde z VC
   if (oldState.channel && !newState.channel) {
     userStatus.delete(member.id);
+    originalChannels.delete(member.id);
   }
 });
 
