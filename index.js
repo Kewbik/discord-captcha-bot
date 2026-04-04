@@ -13,16 +13,14 @@ const client = new Client({
 
 const userStatus = new Map(); // verifying / verified
 const joinCooldown = new Set();
-const originalChannels = new Map(); // 👉 uloží původní channel
+const originalChannels = new Map();
 
 const CAPTCHA_TIMEOUT = 30000;
 const VERIFY_EXPIRE = 60000;
 const COOLDOWN_TIME = 3000;
 
-// 👉 ID WAITING ROOMKY
 const WAITING_ROOM_ID = "1489718904409292930";
 
-// BYPASS ROLE IDs
 const bypassRoleIDs = [
   "1489344221952348200"
 ];
@@ -31,7 +29,6 @@ client.on('ready', () => {
   console.log(`Logged in as ${client.user.tag}`);
 });
 
-// Captcha generator
 function generateCaptcha() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789";
   let text = "";
@@ -48,48 +45,31 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
   const member = newState.member;
   if (!member || member.user.bot) return;
 
-  // bypass role
   if (member.roles.cache.some(role => bypassRoleIDs.includes(role.id))) {
     return;
   }
 
   const status = userStatus.get(member.id);
 
-  // USER JE VE VOICE
-  if (newState.channel) {
+  // =========================
+  // ✅ 1. JOIN (spustí captcha)
+  // =========================
+  if (!oldState.channel && newState.channel) {
 
-    // 👉 pokud už je ve waiting room a řeší captcha → NIC NEDĚLEJ
-    if (newState.channel.id === WAITING_ROOM_ID && status === "verifying") {
-      return;
+    // uložíme původní channel
+    originalChannels.set(member.id, newState.channel.id);
+
+    // přesun do waiting room
+    try {
+      await member.voice.setChannel(WAITING_ROOM_ID);
+    } catch (err) {
+      console.log("Move failed:", err);
     }
 
-    // 👉 pokud není verified → drž ho ve waiting room
-    if (status !== "verified" && newState.channel.id !== WAITING_ROOM_ID) {
-
-      // uložíme původní channel (jen poprvé)
-      if (!originalChannels.has(member.id)) {
-        originalChannels.set(member.id, newState.channel.id);
-      }
-
-      try {
-        await member.voice.setChannel(WAITING_ROOM_ID);
-      } catch (err) {
-        console.log("Force move failed:", err);
-      }
-    }
-
-    // 👉 už řeší captcha → nespouštěj znovu
-    if (status === "verifying") return;
-
-    // 👉 už je verified → nech ho být
-    if (status === "verified") return;
-
-    // 👉 anti spam
     if (joinCooldown.has(member.id)) return;
     joinCooldown.add(member.id);
     setTimeout(() => joinCooldown.delete(member.id), COOLDOWN_TIME);
 
-    // 👉 začni verification
     userStatus.set(member.id, "verifying");
 
     const captcha = generateCaptcha();
@@ -124,7 +104,6 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
         userStatus.set(member.id, "verified");
         await member.send("Verified! Moving you back...");
 
-        // 👉 vrátíme zpět do původního channelu
         const originalChannelId = originalChannels.get(member.id);
 
         try {
@@ -137,7 +116,6 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
 
         originalChannels.delete(member.id);
 
-        // expire verification
         setTimeout(() => {
           userStatus.delete(member.id);
         }, VERIFY_EXPIRE);
@@ -155,7 +133,23 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     }
   }
 
-  // reset když odejde z VC
+  // =========================
+  // 🔒 2. SWITCH (blokuje útěk)
+  // =========================
+  if (oldState.channel && newState.channel) {
+
+    if (status !== "verified" && newState.channel.id !== WAITING_ROOM_ID) {
+      try {
+        await member.voice.setChannel(WAITING_ROOM_ID);
+      } catch (err) {
+        console.log("Force move failed:", err);
+      }
+    }
+  }
+
+  // =========================
+  // ❌ 3. LEAVE (reset)
+  // =========================
   if (oldState.channel && !newState.channel) {
     userStatus.delete(member.id);
     originalChannels.delete(member.id);
